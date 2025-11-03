@@ -4,47 +4,63 @@ import numpy as np
 import joblib
 from tensorflow.keras.models import load_model
 from sklearn.preprocessing import StandardScaler
+import google.generativeai as genai
 
-# Load models
+# 🔐 Configure Gemini API key securely from Streamlit secrets
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+
+# Load trained models and preprocessing tools
 rf_model = joblib.load('rf_crop_model.pkl')
 nn_model = load_model('nn_crop_model.h5')
+scaler = joblib.load('scaler.pkl')
+le = joblib.load('label_encoder.pkl')
 
-# Load scaler used in training
-scaler = joblib.load('scaler.pkl')  # Make sure to save your scaler as well
-# Example: joblib.dump(scaler, 'scaler.pkl') after training
-
-# Streamlit UI
-st.title("🌾 Crop Recommendation System")
-st.write("Enter the soil and weather parameters to predict the best crop.")
+# Streamlit app title and description
+st.title("🌾 AI-Powered Crop Recommendation System")
+st.write("Enter soil and weather parameters to predict the best crop and get AI-based fertilizer suggestions.")
 
 # Input fields
-N = st.number_input("Nitrogen (N)", min_value=0, max_value=200, value=80)
-P = st.number_input("Phosphorous (P)", min_value=0, max_value=200, value=45)
-K = st.number_input("Potassium (K)", min_value=0, max_value=200, value=43)
-temperature = st.number_input("Temperature (°C)", min_value=0.0, max_value=50.0, value=25.0)
-humidity = st.number_input("Humidity (%)", min_value=0.0, max_value=100.0, value=80.0)
-ph = st.number_input("pH of soil", min_value=0.0, max_value=14.0, value=7.0)
-rainfall = st.number_input("Rainfall (mm)", min_value=0.0, max_value=500.0, value=250.0)
+N = st.number_input("Nitrogen (N)", 0, 200, 80)
+P = st.number_input("Phosphorous (P)", 0, 200, 45)
+K = st.number_input("Potassium (K)", 0, 200, 43)
+temperature = st.number_input("Temperature (°C)", 0.0, 50.0, 25.0)
+humidity = st.number_input("Humidity (%)", 0.0, 100.0, 80.0)
+ph = st.number_input("pH of soil", 0.0, 14.0, 7.0)
+rainfall = st.number_input("Rainfall (mm)", 0.0, 500.0, 250.0)
 
-# Predict button
-# Predict button
 if st.button("Predict Crop"):
-    # Prepare input
+    # Prepare input for prediction
     sample = np.array([[N, P, K, temperature, humidity, ph, rainfall]])
     sample_scaled = scaler.transform(sample)
 
-    # Load LabelEncoder
-    le = joblib.load('label_encoder.pkl')
+    # Model predictions
+    rf_pred_num = rf_model.predict(sample_scaled)
+    rf_pred_label = le.inverse_transform(rf_pred_num)[0]
 
-    # Random Forest prediction
-    rf_pred_num = rf_model.predict(sample_scaled)          # numeric label
-    rf_pred_label = le.inverse_transform(rf_pred_num)     # convert to crop name
-
-    # Neural Network prediction
     nn_pred_num = nn_model.predict(sample_scaled).argmax()
     nn_pred_label = le.inverse_transform([nn_pred_num])[0]
 
-    # Display predictions
-    st.success(f"Random Forest Prediction: {rf_pred_label[0]}")
-    #st.success(f"Neural Network Prediction: {nn_pred_label}")
+    st.success(f"🌾 Recommended Crop: {rf_pred_label}")
 
+    # --- AI Explanation using Gemini ---
+    prompt = f"""
+    You are an agricultural expert.
+    Given the following soil and weather data:
+    - Nitrogen: {N}
+    - Phosphorous: {P}
+    - Potassium: {K}
+    - Temperature: {temperature}°C
+    - Humidity: {humidity}%
+    - Soil pH: {ph}
+    - Rainfall: {rainfall} mm
+
+    The predicted crop is **{rf_pred_label}**.
+    Suggest the most suitable fertilizer and explain clearly why it fits these conditions.
+    """
+
+    with st.spinner("🧠 AI analyzing fertilizer recommendation..."):
+        model = genai.GenerativeModel("models/gemini-2.5-flash")  # ✅ updated model name
+        response = model.generate_content(prompt)
+
+    st.subheader("💬 AI Fertilizer Recommendation & Reasoning:")
+    st.write(response.text or "No response received. Please try again.")
